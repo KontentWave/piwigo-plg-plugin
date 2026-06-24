@@ -1,0 +1,1 @@
+Pravidelné SMS kontroly aktivity pre vlastníkov albumov bez administrátorských práv s auditom a obnovou viditeľnosti.

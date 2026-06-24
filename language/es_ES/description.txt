@@ -1,0 +1,1 @@
+Comprobaciones periódicas por SMS para verificar la vigencia del perfil de propietarios de álbumes no administradores.

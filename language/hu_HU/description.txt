@@ -1,0 +1,1 @@
+Rendszeres SMS-alapú aktivitásellenőrzés nem adminisztrátor albumbirtokosok számára naplózási és visszaállítási lehetőségekkel.
