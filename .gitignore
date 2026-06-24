@@ -7,15 +7,6 @@ Thumbs.db
 *.log
 *.swp
 *.swo
-*~.DS_Store
-Thumbs.db
-
-.idea/
-.vscode/
-
-*.log
-*.swp
-*.swo
 *~
 
 coverage/
