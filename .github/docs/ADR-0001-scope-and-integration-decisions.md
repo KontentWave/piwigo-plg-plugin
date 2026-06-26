@@ -18,10 +18,10 @@ Three questions had to be resolved explicitly:
 PLG is implemented as a separate companion plugin with the following rules:
 
 1. PLG owns liveness scheduling, OTP challenge state, late-confirm handling, audit logging, and owner/admin UI.
-2. Two Factor SMS remains the SMS transport and verified-phone dependency. PLG reads the verified phone through `PwgTwoFactor` and sends OTP through the existing Two Factor SMS helper.
+2. Two Factor SMS remains the login-authentication, SMS transport, and verified-phone dependency. PLG reads the trusted verified phone through `tf_get_verified_sms_phone($user_id)` when available, with a local fallback only for compatibility, and sends OTP through the existing Two Factor SMS helper.
 3. CPT remains the only component that changes album-tree visibility. PLG calls CPT helpers and does not write privacy state directly.
 4. PLG applies only to non-admin album owners. Webmaster/admin accounts are excluded from the owner liveness workflow and do not receive the PLG profile block.
-5. After a successful PLG confirmation, PLG disables SMS login enrollment for that user and continues future weekly checks using the PLG-stored `verified_phone`. This keeps login 2FA concerns separate from periodic gallery-liveness checks.
+5. PLG owns the decision to disable SMS login enrollment after a successful PLG confirmation. If that policy step is executed, it must be explicit, observable in the PLG audit log, and must not imply that Two Factor owns the recurring weekly liveness workflow. PLG continues future weekly checks using the PLG-stored `verified_phone`.
 6. Late confirmation after expiry does not automatically re-publicize the owner tree. The default recovery policy is `awaiting_admin_restore` followed by an explicit admin restore action.
 7. Localization is implemented through native Piwigo language packs inside PLG. LanguageSwitch compatibility is achieved by shipping PLG locale folders, not by patching the LanguageSwitch plugin itself. The delivered locale set is `en_UK`, `es_ES`, `hu_HU`, `sk_SK`, `ru_RU`, `uk_UA`, and `zh_CN`.
 
@@ -31,6 +31,7 @@ Positive:
 
 - PLG stays narrowly aligned to its safety/freshness purpose.
 - Existing SMS and privacy code remains reusable and authoritative.
+- The boundary between login 2FA and weekly liveness stays explicit: Two Factor owns login auth, while PLG owns recurring liveness orchestration.
 - Admin/webmaster accounts are not forced into an album-owner verification cycle.
 - Late recovery is safer because public visibility is restored only after review.
 - Localization remains standard Piwigo plugin behavior and automatically follows the active gallery language.

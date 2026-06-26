@@ -301,9 +301,18 @@ PLG treats a helper error as a failed operation and logs it.
 Current integration:
 
 ```text
-- PLG bootstraps `PwgTwoFactor` to read the verified SMS phone
+- PLG uses `tf_get_verified_sms_phone($user_id)` as the trusted phone source when available
+- PLG may fall back to the current Two Factor class reader only for compatibility on older local states
 - PLG sends OTP through the existing Two Factor SMS transport helpers
-- after a successful PLG confirmation, PLG disables SMS login enrollment for that user and keeps using the PLG-stored `verified_phone` for later weekly checks
+- after a successful PLG confirmation, PLG may explicitly disable SMS login enrollment for that user as a PLG policy step and keeps using the PLG-stored `verified_phone` for later weekly checks
+```
+
+Boundary reminder:
+
+```text
+- Two Factor owns login authentication and verified-phone storage
+- PLG owns recurring weekly liveness orchestration and state
+- disabling SMS login enrollment is an explicit PLG policy action, not shared workflow ownership
 ```
 
 PLG should not know or store the SMSTOOLS API key.
@@ -383,3 +392,461 @@ PLG should not know or store the SMSTOOLS API key.
 - No visitor can trigger SMS.
 - Admin can review status and recover profile after late confirmation.
 - PHPUnit and Cypress cover core state transitions. Current status: still pending.
+
+---
+
+## Phase 1.1: Privacy Snapshot Before Forced Privatization
+
+Status: planned hardening extension.
+
+### `Action`
+
+Before PLG forces an expired owner album tree to private, capture the current privacy state of every album in that effective owner tree. If the owner confirms late and an administrator approves restoration, restore every album to its captured pre-PLG visibility instead of blindly making the whole tree public.
+
+This prevents a serious overexposure bug:
+
+```text
+Before expiry:
+- root album: public
+- album A: public
+- album B: private
+- album C: shared with selected users
+
+After PLG expiry:
+- all albums become private
+
+After late verification + admin restore:
+- root album: public
+- album A: public
+- album B: private
+- album C: shared with selected users
+```
+
+PLG must never turn a previously private/shared album public just because the profile owner confirmed late.
+
+---
+
+## Why This Extension Exists
+
+The current MVP intentionally hides an expired profile by calling CPT to make the owner tree private.
+
+However, admin restore currently has a risky simplification if it restores all affected albums as public. That is acceptable for a very early smoke test, but not safe for a real portal because a gallery owner may already have intentionally private or shared child albums before PLG expiry.
+
+PLG should treat forced privatization as a reversible safety overlay, not as a permanent rewrite of the owner's privacy choices.
+
+---
+
+## Design Decision
+
+Take the restoration snapshot immediately before forced privatization, not when the SMS challenge is first sent.
+
+Reason:
+
+```text
+SMS sent
+-> owner still has a grace period
+-> owner/admin might change album privacy during the grace period
+-> expiry happens later
+```
+
+The safest snapshot is the state PLG is about to overwrite at expiry time.
+
+Optional later enhancement:
+
+```text
+Also record a lightweight "challenge-start visibility hash" for diagnostics,
+but do not use it for restore unless explicitly designed.
+```
+
+---
+
+## Data Model Extension
+
+Add a dedicated snapshot table.
+
+```sql
+CREATE TABLE piwigo_profile_liveness_guard_album_snapshot (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  guard_record_id INT NOT NULL,
+  user_id INT NOT NULL,
+  root_category_id INT NOT NULL,
+  album_id INT NOT NULL,
+  previous_status VARCHAR(16) NOT NULL,
+  previous_visibility_mode VARCHAR(16) NOT NULL,
+  previous_shared_user_ids TEXT NULL,
+  captured_at DATETIME NOT NULL,
+  restored_at DATETIME NULL,
+  restore_status VARCHAR(32) NULL,
+  UNIQUE KEY plg_snapshot_album (guard_record_id, album_id),
+  KEY plg_snapshot_record (guard_record_id),
+  KEY plg_snapshot_user_root (user_id, root_category_id)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4;
+```
+
+Field meaning:
+
+```text
+guard_record_id
+= PLG liveness record id for this owner/root album cycle
+
+album_id
+= root album or descendant album id
+
+previous_status
+= original Piwigo category status, usually public/private
+
+previous_visibility_mode
+= CPT interpretation: public/private/shared
+
+previous_shared_user_ids
+= JSON/text array of selected user ids if previous_visibility_mode = shared
+
+captured_at
+= when PLG captured the state just before privatization
+
+restored_at
+= when admin restore applied this row
+
+restore_status
+= restored/skipped/error
+```
+
+The snapshot table should be created/updated by `maintain.class.php`.
+
+Upgrade rule:
+
+```text
+If upgrading from an existing PLG install, create the snapshot table without touching existing guard records.
+```
+
+---
+
+## Snapshot Capture Algorithm
+
+Add helper:
+
+```php
+profile_liveness_guard_capture_visibility_snapshot(array $record): array
+```
+
+Expected behavior:
+
+```text
+1. Resolve root album id and owner user id from the guard record.
+2. Fetch the effective owner album tree.
+3. For each album, verify it still belongs to the same effective owner.
+4. Read current album status from categories.status.
+5. Read CPT visibility mode using cpt_get_album_visibility_mode() when available.
+6. Read selected shared users using cpt_get_album_shared_user_ids() when available.
+7. Store one snapshot row per album.
+8. Do not overwrite an existing snapshot for the same guard record and album.
+9. Log `visibility_snapshot_captured`.
+```
+
+Ownership safety:
+
+```text
+Only snapshot/update albums whose effective owner is the guard owner.
+If an explicit child owner exists under the tree, skip it and log `visibility_snapshot_album_skipped`.
+```
+
+Reason:
+
+```text
+PLG must not hide or restore another owner's explicit child album.
+```
+
+---
+
+## Forced Privatization Flow
+
+Update expiry handling:
+
+```text
+1. Load expired `sms_sent` records.
+2. Before calling CPT to privatize, capture a visibility snapshot.
+3. If snapshot capture fails, do not privatize unless `allow_privatize_without_snapshot` is explicitly enabled.
+4. Call CPT to make only the effective owner's albums private.
+5. Mark status `albums_privatized`.
+6. Log affected album ids and snapshot row count.
+```
+
+Recommended config:
+
+```php
+$conf['profile_liveness_guard'] = array(
+  // existing keys...
+  'restore_original_privacy' => true,
+  'allow_privatize_without_snapshot' => false,
+);
+```
+
+Default recommendation:
+
+```text
+restore_original_privacy = true
+allow_privatize_without_snapshot = false
+```
+
+Failing closed is safer. If PLG cannot remember what it is about to overwrite, it should not overwrite it unless the admin deliberately allows that mode.
+
+---
+
+## Restore Algorithm
+
+Replace the current "make all albums public" restore logic with snapshot-based restore.
+
+Add helper:
+
+```php
+profile_liveness_guard_restore_visibility_snapshot(array $record, int $actor_user_id): array
+```
+
+Expected behavior:
+
+```text
+1. Load snapshot rows for the guard record.
+2. For each snapshot row, verify the album still exists.
+3. Verify the album still belongs to the same effective owner.
+4. Restore via cpt_update_album():
+   - previous_visibility_mode = public
+     -> status public, mode public
+   - previous_visibility_mode = private
+     -> status private, mode private, no shared users
+   - previous_visibility_mode = shared
+     -> status private, mode shared, previous shared users
+5. Mark snapshot rows restored.
+6. Mark PLG record `verified`.
+7. Set `restored_by` and `restored_at`.
+8. Log `visibility_snapshot_restored` and `admin_restore_completed`.
+```
+
+If a snapshot row cannot be restored:
+
+```text
+- skip the album
+- log `visibility_snapshot_restore_failed`
+- keep the admin informed
+- do not silently make it public
+```
+
+---
+
+## Admin UX Update
+
+Admin restore copy should change from:
+
+```text
+Restore profile
+```
+
+to something clearer:
+
+```text
+Restore original visibility
+```
+
+or:
+
+```text
+Restore saved album privacy
+```
+
+Admin panel should show:
+
+```text
+Snapshot captured: yes/no
+Snapshot album count
+Public/private/shared count before expiry
+Restore status
+```
+
+Suggested warning when snapshot is missing:
+
+```text
+No saved privacy snapshot exists for this record. Restoring all albums to public is unsafe and disabled by default.
+```
+
+---
+
+## Owner UX Update
+
+When owner confirms late:
+
+```text
+Your phone was verified, but your albums were already hidden.
+An administrator must review and restore the saved album privacy.
+```
+
+Do not say "your albums will be made public" because the correct behavior is restoration of the previous privacy mix.
+
+---
+
+## Updated Security Rules
+
+Add these rules to the Security section:
+
+- PLG must snapshot album visibility before forced privatization.
+- PLG must restore from the snapshot after late verification and admin approval.
+- PLG must not make previously private/shared albums public unless the snapshot says they were public.
+- PLG must not overwrite an existing snapshot for the same expired cycle.
+- PLG must skip explicit child-owner albums in the owner tree.
+- PLG must fail closed if snapshot capture fails and `allow_privatize_without_snapshot` is false.
+- Admin restore must be logged with actor id and snapshot restore counts.
+
+---
+
+## Updated Scheduled Job Algorithm
+
+Replace the expiry portion of the due scan with:
+
+```text
+6. Load profiles where `challenge_expires_at < NOW()` and `status = sms_sent`.
+7. Capture current visibility snapshot for the owner tree.
+8. If snapshot capture succeeds, call the CPT tree-private helper.
+9. Mark `status = albums_privatized`.
+10. Log `visibility_snapshot_captured` and `albums_privatized`.
+```
+
+Late restore now becomes:
+
+```text
+1. Owner confirms OTP after expiry.
+2. PLG moves status to `awaiting_admin_restore`.
+3. Admin reviews restore candidate.
+4. PLG restores each album from snapshot.
+5. PLG marks record `verified`.
+6. PLG logs `visibility_snapshot_restored` and `admin_restore_completed`.
+```
+
+---
+
+## Updated PHPUnit Test Plan
+
+Add these tests:
+
+13. Snapshot captures public, private, and shared album states before forced privatization.
+14. Snapshot stores shared user ids for shared albums.
+15. Expiry does not privatize if snapshot capture fails and fail-closed mode is enabled.
+16. Re-running expiry does not overwrite an existing snapshot.
+17. Admin restore restores public albums to public.
+18. Admin restore keeps originally private albums private.
+19. Admin restore restores originally shared albums with the same shared users.
+20. Admin restore skips albums that no longer belong to the original owner.
+21. Missing snapshot prevents unsafe restore-to-public.
+22. Snapshot capture and restore events are written to the audit log.
+
+---
+
+## Updated Cypress / E2E Acceptance Scenarios
+
+Add these scenarios:
+
+10. Mixed public/private/shared album tree is restored to its original visibility after late verification and admin approval.
+11. A previously private child album is not made public by PLG restore.
+12. A previously shared child album remains shared with the same selected users after PLG restore.
+13. Admin sees a warning when a restore candidate has no visibility snapshot.
+14. Expired profile remains hidden until admin approval even after late owner confirmation.
+
+---
+
+## Updated Definition of Done
+
+Add these items:
+
+- PLG captures a visibility snapshot before forced privatization.
+- Snapshot includes album id, previous status, previous CPT visibility mode, and previous shared users.
+- Forced privatization fails closed if snapshot capture fails.
+- Admin restore uses the saved snapshot instead of blindly setting albums public.
+- Private albums remain private after restore.
+- Shared albums retain their selected user access after restore.
+- Snapshot capture and restore are covered by unit and E2E tests.
+
+---
+
+## Verified Two Factor Phone Source Contract
+
+Status: required integration rule.
+
+PLG must rely on the verified SMS phone stored by the Two Factor plugin, not on the raw editable CPT profile phone.
+
+Reason:
+
+```text
+CPT contact_number
+= editable candidate phone
+= can change any time in My Profile
+= not trusted for liveness until verified
+
+two_factor.phone_number
+= previously verified SMS phone
+= updated only after a successful SMS OTP verification
+
+PLG verified_phone
+= copied/recorded from the trusted Two Factor phone used for the liveness challenge
+```
+
+This protects the liveness workflow when an owner edits her public contact number. The profile may show that re-verification is required, but PLG must continue to treat the previously verified Two Factor phone as the trusted phone until the new number is verified.
+
+---
+
+## Recommended Two Factor Helper
+
+Add or consume a small Two Factor helper so PLG does not need to know the `two_factor` table shape:
+
+```php
+tf_get_verified_sms_phone(int $user_id): ?string
+```
+
+Expected behavior:
+
+```text
+1. Return the normalized verified SMS phone from the Two Factor `sms` method row.
+2. Return null if SMS 2FA/verification is not enabled for the user.
+3. Never return raw CPT `contact_number`.
+4. Never expose the full phone to public templates.
+```
+
+PLG-side usage:
+
+```php
+$phone = function_exists('tf_get_verified_sms_phone')
+  ? tf_get_verified_sms_phone($user_id)
+  : profile_liveness_guard_get_phone_number($user_id);
+```
+
+For the current fallback implementation, PLG may still bootstrap `PwgTwoFactor('sms')->getPhoneNumber()`, because that value is the stored verified phone after OTP setup. But the helper is cleaner and avoids coupling PLG to the class/table details.
+
+---
+
+## PLG Behavior When CPT Phone Changes
+
+If the owner changes `CPT contact_number` but has not verified the new number yet:
+
+```text
+- Two Factor UI shows re-verification required.
+- `two_factor.phone_number` remains the previously verified number.
+- PLG continues to send liveness SMS to the previously verified number.
+- PLG does not read or trust the raw CPT candidate number.
+- PLG does not reset expiry or restore albums just because CPT phone changed.
+```
+
+After the owner successfully verifies the new CPT phone through Two Factor:
+
+```text
+- Two Factor updates `two_factor.phone_number`.
+- Future PLG liveness SMS challenges use the new verified phone.
+- Existing PLG `verified_phone` may be updated on the next successful liveness send/confirmation.
+```
+
+---
+
+## Updated Security Rules For Phone Source
+
+Add these rules to the Security section:
+
+- PLG must use the trusted verified SMS phone from Two Factor.
+- PLG must not send liveness SMS to raw CPT `contact_number`.
+- PLG must not infer liveness from the existence of a CPT phone.
+- PLG must not force a new liveness cycle merely because the CPT phone changed.
+- If no verified Two Factor SMS phone exists, PLG should show setup-required state and refuse to send liveness SMS.
