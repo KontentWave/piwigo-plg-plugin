@@ -39,6 +39,7 @@ define('PROFILE_LIVENESS_GUARD_ID',      basename(dirname(__FILE__)));
 define('PROFILE_LIVENESS_GUARD_PATH' ,   PHPWG_PLUGINS_PATH . PROFILE_LIVENESS_GUARD_ID . '/');
 define('PROFILE_LIVENESS_GUARD_TABLE',   $prefixeTable . 'profile_liveness_guard');
 define('PROFILE_LIVENESS_GUARD_LOG_TABLE',   $prefixeTable . 'profile_liveness_guard_log');
+define('PROFILE_LIVENESS_GUARD_SNAPSHOT_TABLE',   $prefixeTable . 'profile_liveness_guard_album_snapshot');
 define('PROFILE_LIVENESS_GUARD_ADMIN',   get_root_url() . 'admin.php?page=plugin-' . PROFILE_LIVENESS_GUARD_ID);
 define('PROFILE_LIVENESS_GUARD_DIR',     PHPWG_ROOT_PATH . PWG_LOCAL_DIR . 'profile_liveness_guard/');
 

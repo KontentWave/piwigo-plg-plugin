@@ -23,6 +23,10 @@ if (isset($_POST['plg_restore_record']))
     if (!empty($result['success']))
     {
       $page['infos'][] = l10n('Profile visibility restored successfully.');
+      if (!empty($result['skipped_album_ids']))
+      {
+        $page['errors'][] = l10n('Some albums could not be restored from the saved snapshot and were left unchanged.');
+      }
     }
     else
     {

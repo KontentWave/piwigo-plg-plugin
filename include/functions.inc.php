@@ -10,6 +10,8 @@ function profile_liveness_guard_get_default_conf()
     'auto_privatize_enabled' => true,
     'max_send_attempts_per_day' => 3,
     'require_admin_restore' => true,
+    'restore_original_privacy' => true,
+    'allow_privatize_without_snapshot' => false,
     'debug_log' => false,
   );
 }
@@ -311,16 +313,41 @@ function profile_liveness_guard_disable_sms_2fa($user_id)
 {
   if (!profile_liveness_guard_bootstrap_two_factor())
   {
-    return false;
+    return array(
+      'success' => false,
+      'disabled' => false,
+      'was_enabled' => null,
+      'is_enabled' => null,
+      'reason' => 'two_factor_unavailable',
+    );
   }
 
-  if (!PwgTwoFactor::isEnabled((int) $user_id, 'sms'))
+  $was_enabled = PwgTwoFactor::isEnabled((int) $user_id, 'sms');
+  if (!$was_enabled)
   {
-    return false;
+    return array(
+      'success' => true,
+      'disabled' => false,
+      'was_enabled' => false,
+      'is_enabled' => false,
+      'reason' => 'already_disabled',
+    );
   }
 
-  $tf = new PwgTwoFactor('sms');
-  return $tf->deleteSecret((int) $user_id);
+  $deleted = function_exists('tf_disable_sms_login_enrollment')
+    ? (bool) tf_disable_sms_login_enrollment((int) $user_id)
+    : (bool) (new PwgTwoFactor('sms'))->deleteSecret((int) $user_id);
+  $is_enabled = PwgTwoFactor::isEnabled((int) $user_id, 'sms');
+
+  return array(
+    'success' => $deleted && !$is_enabled,
+    'disabled' => $deleted,
+    'was_enabled' => true,
+    'is_enabled' => $is_enabled,
+    'reason' => $deleted
+      ? ($is_enabled ? 'delete_returned_true_but_method_still_enabled' : 'deleted')
+      : 'delete_secret_returned_false',
+  );
 }
 
 function profile_liveness_guard_get_phone_number($user_id)
@@ -330,8 +357,15 @@ function profile_liveness_guard_get_phone_number($user_id)
     return null;
   }
 
-  $tf = new PwgTwoFactor('sms');
-  $phone = $tf->getPhoneNumber((int) $user_id);
+  if (function_exists('tf_get_verified_sms_phone'))
+  {
+    $phone = tf_get_verified_sms_phone((int) $user_id);
+  }
+  else
+  {
+    $tf = new PwgTwoFactor('sms');
+    $phone = $tf->getPhoneNumber((int) $user_id);
+  }
 
   if (empty($phone))
   {
@@ -378,11 +412,11 @@ function profile_liveness_guard_ensure_record($user_id)
 
   $root_category_id = (int) $root_album['id'];
   $record = profile_liveness_guard_get_record($user_id, $root_category_id);
-  $phone = profile_liveness_guard_get_phone_number($user_id);
+  $trusted_phone = profile_liveness_guard_get_phone_number($user_id);
 
   if ($record === null)
   {
-    if (empty($phone))
+    if (empty($trusted_phone))
     {
       return array('success' => false, 'message' => l10n('No verified SMS phone is available for this user.'));
     }
@@ -391,7 +425,7 @@ function profile_liveness_guard_ensure_record($user_id)
       'user_id' => $user_id,
       'root_category_id' => $root_category_id,
       'status' => 'not_started',
-      'verified_phone' => $phone,
+      'verified_phone' => $trusted_phone,
       'next_due_at' => profile_liveness_guard_get_now(),
       'last_error' => null,
     ));
@@ -399,9 +433,11 @@ function profile_liveness_guard_ensure_record($user_id)
   }
   else
   {
-    if (empty($phone))
+    $phone = $record['verified_phone'] ?? null;
+
+    if (empty($phone) && !empty($trusted_phone))
     {
-      $phone = $record['verified_phone'] ?? null;
+      $phone = $trusted_phone;
     }
 
     if (empty($phone))
@@ -409,13 +445,14 @@ function profile_liveness_guard_ensure_record($user_id)
       return array('success' => false, 'message' => l10n('No verified SMS phone is available for this user.'));
     }
 
-    if (($record['verified_phone'] ?? '') !== $phone)
+    if (!empty($trusted_phone) && ($record['verified_phone'] ?? '') !== $trusted_phone)
     {
       $record = profile_liveness_guard_save_record(array(
         'user_id' => $user_id,
         'root_category_id' => $root_category_id,
-        'verified_phone' => $phone,
+        'verified_phone' => $trusted_phone,
       ));
+      $phone = $trusted_phone;
     }
   }
 
@@ -424,6 +461,218 @@ function profile_liveness_guard_ensure_record($user_id)
     'record' => $record,
     'root_album' => $root_album,
     'phone' => $phone,
+  );
+}
+
+function profile_liveness_guard_get_snapshot_rows(array $record)
+{
+  $rows = array();
+
+  if (empty($record['id']))
+  {
+    return $rows;
+  }
+
+  $query = '
+SELECT *
+  FROM '.PROFILE_LIVENESS_GUARD_SNAPSHOT_TABLE.'
+  WHERE guard_record_id = '.(int) $record['id'].'
+  ORDER BY album_id ASC
+;';
+
+  $result = pwg_query($query);
+  while ($row = pwg_db_fetch_assoc($result))
+  {
+    $rows[] = $row;
+  }
+
+  return $rows;
+}
+
+function profile_liveness_guard_snapshot_rows_by_album(array $record)
+{
+  $indexed = array();
+  foreach (profile_liveness_guard_get_snapshot_rows($record) as $row)
+  {
+    $indexed[(int) $row['album_id']] = $row;
+  }
+
+  return $indexed;
+}
+
+function profile_liveness_guard_get_album_row($album_id)
+{
+  $result = pwg_query('SELECT id, status FROM '.CATEGORIES_TABLE.' WHERE id = '.(int) $album_id.' LIMIT 1;');
+  if (!$result || pwg_db_num_rows($result) === 0)
+  {
+    return null;
+  }
+
+  return pwg_db_fetch_assoc($result);
+}
+
+function profile_liveness_guard_capture_visibility_snapshot(array $record)
+{
+  if (empty($record['id']) || !profile_liveness_guard_bootstrap_cpt())
+  {
+    return array('success' => false, 'message' => l10n('Unable to capture a visibility snapshot right now.'));
+  }
+
+  $existing_rows = profile_liveness_guard_snapshot_rows_by_album($record);
+  $existing_count = count($existing_rows);
+  $album_ids = profile_liveness_guard_get_owned_tree_album_ids((int) $record['root_category_id']);
+  $created_count = 0;
+
+  foreach ($album_ids as $album_id)
+  {
+    if (isset($existing_rows[$album_id]))
+    {
+      continue;
+    }
+
+    if (function_exists('cpt_get_album_effective_owner_id')
+      && cpt_get_album_effective_owner_id((int) $album_id) !== (int) $record['user_id'])
+    {
+      profile_liveness_guard_log_event($record['user_id'], $record['root_category_id'], 'visibility_snapshot_album_skipped', 'album_id='.$album_id, null);
+      continue;
+    }
+
+    $album = profile_liveness_guard_get_album_row($album_id);
+    if ($album === null)
+    {
+      profile_liveness_guard_log_event($record['user_id'], $record['root_category_id'], 'visibility_snapshot_album_skipped', 'album_missing='.$album_id, null);
+      continue;
+    }
+
+    $status = isset($album['status']) ? (string) $album['status'] : 'public';
+    $visibility_mode = function_exists('cpt_get_album_visibility_mode')
+      ? cpt_get_album_visibility_mode((int) $album_id, (int) $record['user_id'])
+      : ('private' === $status ? 'private' : 'public');
+    $shared_user_ids = ('shared' === $visibility_mode && function_exists('cpt_get_album_shared_user_ids'))
+      ? cpt_get_album_shared_user_ids((int) $album_id, (int) $record['user_id'])
+      : array();
+
+    $query = '
+INSERT IGNORE INTO '.PROFILE_LIVENESS_GUARD_SNAPSHOT_TABLE.'
+  (guard_record_id, user_id, root_category_id, album_id, previous_status, previous_visibility_mode, previous_shared_user_ids)
+VALUES
+  ('.(int) $record['id'].', '.(int) $record['user_id'].', '.(int) $record['root_category_id'].', '.(int) $album_id.', '.profile_liveness_guard_sql_value($status).', '.profile_liveness_guard_sql_value($visibility_mode).', '.profile_liveness_guard_sql_value(empty($shared_user_ids) ? null : json_encode(array_values(array_map('intval', $shared_user_ids)))).')
+;';
+    pwg_query($query);
+
+    $affected = function_exists('pwg_db_affected_rows') ? (int) pwg_db_affected_rows() : 0;
+    if ($affected > 0)
+    {
+      $created_count++;
+    }
+  }
+
+  $snapshot_count = count(profile_liveness_guard_get_snapshot_rows($record));
+  if ($snapshot_count <= 0)
+  {
+    return array('success' => false, 'message' => l10n('No visibility snapshot could be captured for this owner tree.'));
+  }
+
+  if ($created_count > 0)
+  {
+    profile_liveness_guard_log_event($record['user_id'], $record['root_category_id'], 'visibility_snapshot_captured', 'rows='.$created_count, null);
+  }
+
+  return array(
+    'success' => true,
+    'created_count' => $created_count,
+    'snapshot_count' => $snapshot_count,
+    'duplicate' => $created_count === 0 && $existing_count === $snapshot_count,
+  );
+}
+
+function profile_liveness_guard_restore_visibility_snapshot(array $record, $actor_user_id)
+{
+  if (!profile_liveness_guard_bootstrap_cpt())
+  {
+    return array('success' => false, 'message' => l10n('CPT dependency is unavailable.'));
+  }
+
+  $snapshot_rows = profile_liveness_guard_get_snapshot_rows($record);
+  if (empty($snapshot_rows))
+  {
+    $message = l10n('No saved privacy snapshot exists for this record. Restoring all albums to public is unsafe and disabled by default.');
+    profile_liveness_guard_log_event($record['user_id'], $record['root_category_id'], 'visibility_snapshot_restore_failed', 'missing_snapshot', $actor_user_id);
+    return array('success' => false, 'message' => $message);
+  }
+
+  $restored_album_ids = array();
+  $skipped_album_ids = array();
+  $restored_at = profile_liveness_guard_get_now();
+
+  foreach ($snapshot_rows as $snapshot_row)
+  {
+    $album_id = (int) $snapshot_row['album_id'];
+    $album = profile_liveness_guard_get_album_row($album_id);
+    if ($album === null)
+    {
+      $skipped_album_ids[] = $album_id;
+      profile_liveness_guard_log_event($record['user_id'], $record['root_category_id'], 'visibility_snapshot_restore_failed', 'album_missing='.$album_id, $actor_user_id);
+      continue;
+    }
+
+    if (function_exists('cpt_get_album_effective_owner_id')
+      && cpt_get_album_effective_owner_id($album_id) !== (int) $record['user_id'])
+    {
+      $skipped_album_ids[] = $album_id;
+      profile_liveness_guard_log_event($record['user_id'], $record['root_category_id'], 'visibility_snapshot_restore_failed', 'owner_mismatch='.$album_id, $actor_user_id);
+      continue;
+    }
+
+    $visibility_mode = (string) ($snapshot_row['previous_visibility_mode'] ?? 'public');
+    $shared_user_ids = array();
+    if (!empty($snapshot_row['previous_shared_user_ids']))
+    {
+      $decoded = json_decode((string) $snapshot_row['previous_shared_user_ids'], true);
+      if (is_array($decoded))
+      {
+        $shared_user_ids = array_values(array_unique(array_map('intval', $decoded)));
+      }
+    }
+
+    $fields = array('status' => 'public');
+    $permission_options = array('mode' => 'public');
+
+    if ('private' === $visibility_mode)
+    {
+      $fields['status'] = 'private';
+      $permission_options = array('mode' => 'private', 'shared_user_ids' => array());
+    }
+    else if ('shared' === $visibility_mode)
+    {
+      $fields['status'] = 'private';
+      $permission_options = array('mode' => 'shared', 'shared_user_ids' => $shared_user_ids);
+    }
+
+    cpt_update_album($album_id, $fields, false, $permission_options, (int) $record['user_id']);
+    pwg_query('UPDATE '.PROFILE_LIVENESS_GUARD_SNAPSHOT_TABLE.'
+  SET restored_at = '.profile_liveness_guard_sql_value($restored_at).',
+      restored_by = '.profile_liveness_guard_sql_value($actor_user_id).'
+  WHERE id = '.(int) $snapshot_row['id'].'
+;');
+    $restored_album_ids[] = $album_id;
+  }
+
+  if (!empty($restored_album_ids))
+  {
+    profile_liveness_guard_log_event($record['user_id'], $record['root_category_id'], 'visibility_snapshot_restored', 'restored='.count($restored_album_ids), $actor_user_id);
+  }
+
+  if (empty($restored_album_ids))
+  {
+    return array('success' => false, 'message' => l10n('No album visibility could be restored safely from the saved snapshot.'));
+  }
+
+  return array(
+    'success' => true,
+    'restored_album_ids' => $restored_album_ids,
+    'skipped_album_ids' => $skipped_album_ids,
+    'snapshot_count' => count($snapshot_rows),
   );
 }
 
@@ -498,6 +747,14 @@ function profile_liveness_guard_request_sms($user_id, $actor_user_id = null, $so
   if ('due_scan' === $source && !$settings['due_scan_enabled'])
   {
     return array('success' => false, 'message' => l10n('Due scan sending is disabled.'));
+  }
+
+  if ('owner' === $source
+    && 'verified' === ($record['status'] ?? '')
+    && !empty($record['next_due_at'])
+    && strtotime($record['next_due_at']) > strtotime($now))
+  {
+    return array('success' => false, 'message' => l10n('The next profile verification is not due yet.'));
   }
 
   if ((int) $settings['max_send_attempts_per_day'] > 0 && profile_liveness_guard_get_send_attempts_today($user_id) >= (int) $settings['max_send_attempts_per_day'])
@@ -592,6 +849,7 @@ function profile_liveness_guard_confirm_code($user_id, $code, $actor_user_id = n
     'user_id' => (int) $record['user_id'],
     'root_category_id' => (int) $record['root_category_id'],
     'status' => $status,
+    'verified_phone' => $context['phone'],
     'last_verified_at' => $now,
     'next_due_at' => $next_due_at,
     'challenge_sent_at' => null,
@@ -600,7 +858,27 @@ function profile_liveness_guard_confirm_code($user_id, $code, $actor_user_id = n
   ));
 
   profile_liveness_guard_log_event($user_id, $record['root_category_id'], $status, null, $actor_user_id);
-  profile_liveness_guard_disable_sms_2fa($user_id);
+  $disable_sms_2fa = profile_liveness_guard_disable_sms_2fa($user_id);
+  if (!empty($disable_sms_2fa['success']))
+  {
+    profile_liveness_guard_log_event(
+      $user_id,
+      $record['root_category_id'],
+      'sms_2fa_disabled',
+      'was_enabled='.(int) !empty($disable_sms_2fa['was_enabled']).';is_enabled='.(int) !empty($disable_sms_2fa['is_enabled']).';reason='.($disable_sms_2fa['reason'] ?? 'unknown'),
+      $actor_user_id
+    );
+  }
+  else
+  {
+    profile_liveness_guard_log_event(
+      $user_id,
+      $record['root_category_id'],
+      'sms_2fa_disable_failed',
+      'was_enabled='.(int) !empty($disable_sms_2fa['was_enabled']).';is_enabled='.(int) !empty($disable_sms_2fa['is_enabled']).';reason='.($disable_sms_2fa['reason'] ?? 'unknown'),
+      $actor_user_id
+    );
+  }
 
   return array('success' => true, 'record' => $record, 'late' => $needs_restore);
 }
@@ -657,6 +935,19 @@ function profile_liveness_guard_handle_expired_record(array $record, $actor_user
     return array('success' => false, 'message' => l10n('Automatic privatization is disabled.'));
   }
 
+  $snapshot = profile_liveness_guard_capture_visibility_snapshot($record);
+  if (empty($snapshot['success']) && empty($settings['allow_privatize_without_snapshot']))
+  {
+    $message = $snapshot['message'] ?? l10n('Unable to capture a visibility snapshot before privatization.');
+    profile_liveness_guard_save_record(array(
+      'user_id' => (int) $record['user_id'],
+      'root_category_id' => (int) $record['root_category_id'],
+      'last_error' => $message,
+    ));
+    profile_liveness_guard_log_event($record['user_id'], $record['root_category_id'], 'privatize_failed', $message, $actor_user_id);
+    return array('success' => false, 'message' => $message);
+  }
+
   $result = profile_liveness_guard_make_owner_tree_private(
     (int) $record['root_category_id'],
     (int) $record['user_id'],
@@ -682,9 +973,20 @@ function profile_liveness_guard_handle_expired_record(array $record, $actor_user
     'albums_privatized_at' => profile_liveness_guard_get_now(),
     'last_error' => null,
   ));
-  profile_liveness_guard_log_event($record['user_id'], $record['root_category_id'], 'albums_privatized', null, $actor_user_id);
+  profile_liveness_guard_log_event(
+    $record['user_id'],
+    $record['root_category_id'],
+    'albums_privatized',
+    'albums='.count($result['affected_album_ids'] ?? array()).';snapshot_rows='.(int) ($snapshot['snapshot_count'] ?? 0),
+    $actor_user_id
+  );
 
-  return array('success' => true, 'record' => $record, 'affected_album_ids' => $result['affected_album_ids'] ?? array());
+  return array(
+    'success' => true,
+    'record' => $record,
+    'affected_album_ids' => $result['affected_album_ids'] ?? array(),
+    'snapshot_count' => (int) ($snapshot['snapshot_count'] ?? 0),
+  );
 }
 
 function profile_liveness_guard_run_due_scan($actor_user_id = null)
@@ -893,10 +1195,10 @@ function profile_liveness_guard_restore_record($user_id, $root_category_id, $act
     return array('success' => false, 'message' => l10n('CPT dependency is unavailable.'));
   }
 
-  $album_ids = profile_liveness_guard_get_owned_tree_album_ids((int) $record['root_category_id']);
-  foreach ($album_ids as $album_id)
+  $restore_result = profile_liveness_guard_restore_visibility_snapshot($record, $actor_user_id);
+  if (empty($restore_result['success']))
   {
-    cpt_update_album((int) $album_id, array('status' => 'public'), false, array('mode' => 'public'), (int) $record['user_id']);
+    return $restore_result;
   }
 
   $restored_at = profile_liveness_guard_get_now();
@@ -914,7 +1216,8 @@ function profile_liveness_guard_restore_record($user_id, $root_category_id, $act
   return array(
     'success' => true,
     'record' => $record,
-    'affected_album_ids' => $album_ids,
+    'affected_album_ids' => $restore_result['restored_album_ids'],
+    'skipped_album_ids' => $restore_result['skipped_album_ids'],
   );
 }
 
@@ -931,11 +1234,23 @@ SELECT
     plg.next_due_at,
     plg.albums_privatized_at,
     plg.restored_at,
-    u.username
+    u.username,
+    COUNT(snapshot.id) AS snapshot_count
   FROM '.PROFILE_LIVENESS_GUARD_TABLE.' AS plg
     INNER JOIN '.USERS_TABLE.' AS u
       ON u.id = plg.user_id
+    LEFT JOIN '.PROFILE_LIVENESS_GUARD_SNAPSHOT_TABLE.' AS snapshot
+      ON snapshot.guard_record_id = plg.id
   WHERE plg.status = \'awaiting_admin_restore\'
+  GROUP BY
+    plg.user_id,
+    plg.root_category_id,
+    plg.status,
+    plg.last_verified_at,
+    plg.next_due_at,
+    plg.albums_privatized_at,
+    plg.restored_at,
+    u.username
   ORDER BY plg.albums_privatized_at DESC, plg.last_verified_at DESC, plg.user_id ASC
 ;';
 
@@ -951,6 +1266,8 @@ SELECT
       'next_due_at' => empty($row['next_due_at']) ? l10n('Not scheduled') : profile_liveness_guard_format_datetime($row['next_due_at']),
       'albums_privatized_at' => empty($row['albums_privatized_at']) ? l10n('Not scheduled') : profile_liveness_guard_format_datetime($row['albums_privatized_at']),
       'restored_at' => empty($row['restored_at']) ? null : profile_liveness_guard_format_datetime($row['restored_at']),
+      'snapshot_count' => (int) $row['snapshot_count'],
+      'has_snapshot' => (int) $row['snapshot_count'] > 0,
     );
   }
 

@@ -64,6 +64,10 @@ $lang['Error'] = 'Erreur';
 $lang['User'] = 'Utilisateur';
 $lang['Action'] = 'Action';
 $lang['Restore visibility'] = 'Restaurer la visibilite';
+$lang['Restore saved visibility'] = 'Restaurer la visibilite enregistree';
+$lang['Snapshot'] = 'Instantane';
+$lang['Saved snapshot available'] = 'Instantane enregistree disponible';
+$lang['Missing snapshot: restore to public is blocked for safety.'] = 'Instantane manquante : le retour en public est bloque pour securite.';
 $lang['No profiles are currently waiting for admin restore.'] = 'Aucun profil n\'attend actuellement une restauration administrateur.';
 $lang['Recent audit events'] = 'Evenements d\'audit recents';
 $lang['When'] = 'Quand';
@@ -72,5 +76,10 @@ $lang['Actor'] = 'Acteur';
 $lang['Details'] = 'Details';
 $lang['No audit events have been logged yet.'] = 'Aucun evenement d\'audit n\'a encore ete journalise.';
 $lang['Profile visibility restored successfully.'] = 'La visibilite du profil a ete restauree avec succes.';
+$lang['Unable to capture a visibility snapshot right now.'] = 'Impossible de capturer un instantane de visibilite pour le moment.';
+$lang['No visibility snapshot could be captured for this owner tree.'] = 'Aucun instantane de visibilite n\'a pu etre capture pour cet arbre proprietaire.';
+$lang['No saved privacy snapshot exists for this record. Restoring all albums to public is unsafe and disabled by default.'] = 'Aucun instantane de confidentialite enregistre n\'existe pour cet enregistrement. Restaurer tous les albums en public n\'est pas sur et reste desactive par defaut.';
+$lang['No album visibility could be restored safely from the saved snapshot.'] = 'Aucune visibilite d\'album n\'a pu etre restauree en toute securite depuis l\'instantane enregistre.';
+$lang['Some albums could not be restored from the saved snapshot and were left unchanged.'] = 'Certains albums n\'ont pas pu etre restaures depuis l\'instantane enregistre et sont restes inchanges.';
 
 ?>

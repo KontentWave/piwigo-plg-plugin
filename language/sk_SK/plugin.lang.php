@@ -58,6 +58,10 @@ $lang['Error'] = 'Chyba';
 $lang['User'] = 'Používateľ';
 $lang['Action'] = 'Akcia';
 $lang['Restore visibility'] = 'Obnoviť viditeľnosť';
+$lang['Restore saved visibility'] = 'Obnoviť uloženú viditeľnosť';
+$lang['Snapshot'] = 'Snímka';
+$lang['Saved snapshot available'] = 'Uložená snímka je k dispozícii';
+$lang['Missing snapshot: restore to public is blocked for safety.'] = 'Chýba snímka: obnovenie na verejné je z bezpečnostných dôvodov zablokované.';
 $lang['No profiles are currently waiting for admin restore.'] = 'Momentálne nečakajú na obnovu administrátorom žiadne profily.';
 $lang['Recent audit events'] = 'Nedávne auditné udalosti';
 $lang['When'] = 'Kedy';
@@ -66,5 +70,10 @@ $lang['Actor'] = 'Vykonal';
 $lang['Details'] = 'Podrobnosti';
 $lang['No audit events have been logged yet.'] = 'Zatiaľ neboli zaznamenané žiadne auditné udalosti.';
 $lang['Profile visibility restored successfully.'] = 'Viditeľnosť profilu bola úspešne obnovená.';
+$lang['Unable to capture a visibility snapshot right now.'] = 'Teraz sa nepodarilo zachytiť snímku viditeľnosti.';
+$lang['No visibility snapshot could be captured for this owner tree.'] = 'Pre tento strom vlastníka sa nepodarilo zachytiť žiadnu snímku viditeľnosti.';
+$lang['No saved privacy snapshot exists for this record. Restoring all albums to public is unsafe and disabled by default.'] = 'Pre tento záznam neexistuje uložená snímka súkromia. Obnovenie všetkých albumov na verejné nie je bezpečné a je predvolene zakázané.';
+$lang['No album visibility could be restored safely from the saved snapshot.'] = 'Zo uloženej snímky sa nepodarilo bezpečne obnoviť viditeľnosť žiadneho albumu.';
+$lang['Some albums could not be restored from the saved snapshot and were left unchanged.'] = 'Niektoré albumy sa nepodarilo obnoviť z uloženej snímky a zostali nezmenené.';
 
 ?>

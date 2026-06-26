@@ -58,6 +58,10 @@ $lang['Error'] = 'Помилка';
 $lang['User'] = 'Користувач';
 $lang['Action'] = 'Дія';
 $lang['Restore visibility'] = 'Відновити видимість';
+$lang['Restore saved visibility'] = 'Відновити збережену видимість';
+$lang['Snapshot'] = 'Знімок';
+$lang['Saved snapshot available'] = 'Збережений знімок доступний';
+$lang['Missing snapshot: restore to public is blocked for safety.'] = 'Знімок відсутній: відновлення до публічного режиму заблоковане з міркувань безпеки.';
 $lang['No profiles are currently waiting for admin restore.'] = 'Наразі немає профілів, які очікують відновлення адміністратором.';
 $lang['Recent audit events'] = 'Останні події аудиту';
 $lang['When'] = 'Коли';
@@ -66,5 +70,10 @@ $lang['Actor'] = 'Виконавець';
 $lang['Details'] = 'Деталі';
 $lang['No audit events have been logged yet.'] = 'Події аудиту ще не зафіксовані.';
 $lang['Profile visibility restored successfully.'] = 'Видимість профілю успішно відновлено.';
+$lang['Unable to capture a visibility snapshot right now.'] = 'Зараз не вдалося зберегти знімок видимості.';
+$lang['No visibility snapshot could be captured for this owner tree.'] = 'Не вдалося зберегти знімок видимості для цього дерева власника.';
+$lang['No saved privacy snapshot exists for this record. Restoring all albums to public is unsafe and disabled by default.'] = 'Для цього запису немає збереженого знімка приватності. Повернення всіх альбомів у публічний режим є небезпечним і за замовчуванням вимкнене.';
+$lang['No album visibility could be restored safely from the saved snapshot.'] = 'Не вдалося безпечно відновити видимість жодного альбому із збереженого знімка.';
+$lang['Some albums could not be restored from the saved snapshot and were left unchanged.'] = 'Деякі альбоми не вдалося відновити із збереженого знімка, тому вони залишилися без змін.';
 
 ?>

@@ -58,6 +58,10 @@ $lang['Error'] = 'Hiba';
 $lang['User'] = 'Felhasználó';
 $lang['Action'] = 'Művelet';
 $lang['Restore visibility'] = 'Láthatóság visszaállítása';
+$lang['Restore saved visibility'] = 'Mentett láthatóság visszaállítása';
+$lang['Snapshot'] = 'Pillanatkép';
+$lang['Saved snapshot available'] = 'Mentett pillanatkép elérhető';
+$lang['Missing snapshot: restore to public is blocked for safety.'] = 'Hiányzó pillanatkép: a nyilvánosra visszaállítás biztonsági okból tiltva.';
 $lang['No profiles are currently waiting for admin restore.'] = 'Jelenleg nincs adminisztrátori visszaállításra váró profil.';
 $lang['Recent audit events'] = 'Legutóbbi audit események';
 $lang['When'] = 'Mikor';
@@ -66,5 +70,10 @@ $lang['Actor'] = 'Végrehajtó';
 $lang['Details'] = 'Részletek';
 $lang['No audit events have been logged yet.'] = 'Még nincsenek naplózott audit események.';
 $lang['Profile visibility restored successfully.'] = 'A profil láthatósága sikeresen visszaállítva.';
+$lang['Unable to capture a visibility snapshot right now.'] = 'A láthatósági pillanatkép most nem rögzíthető.';
+$lang['No visibility snapshot could be captured for this owner tree.'] = 'Ehhez a tulajdonosi fához nem sikerült láthatósági pillanatképet rögzíteni.';
+$lang['No saved privacy snapshot exists for this record. Restoring all albums to public is unsafe and disabled by default.'] = 'Ehhez a rekordhoz nincs mentett adatvédelmi pillanatkép. Az összes album nyilvánossá tétele nem biztonságos, ezért alapértelmezés szerint tiltott.';
+$lang['No album visibility could be restored safely from the saved snapshot.'] = 'A mentett pillanatképből egyetlen album láthatósága sem volt biztonságosan visszaállítható.';
+$lang['Some albums could not be restored from the saved snapshot and were left unchanged.'] = 'Néhány albumot nem lehetett visszaállítani a mentett pillanatképből, ezért változatlan maradt.';
 
 ?>

@@ -43,6 +43,7 @@
           <th>{'Status'|translate}</th>
           <th>{'Last verified'|translate}</th>
           <th>{'Albums privatized'|translate}</th>
+          <th>{'Snapshot'|translate}</th>
           <th>{'Action'|translate}</th>
         </tr>
       </thead>
@@ -55,7 +56,14 @@
           <td>{$record.last_verified_at}</td>
           <td>{$record.albums_privatized_at}</td>
           <td>
-            <button type="submit" class="submit" name="plg_restore_record" value="{$record.user_id}:{$record.root_category_id}">{'Restore visibility'|translate}</button>
+            {if $record.has_snapshot}
+              {'Saved snapshot available'|translate} ({$record.snapshot_count})
+            {else}
+              {'Missing snapshot: restore to public is blocked for safety.'|translate}
+            {/if}
+          </td>
+          <td>
+            <button type="submit" class="submit" name="plg_restore_record" value="{$record.user_id}:{$record.root_category_id}">{'Restore saved visibility'|translate}</button>
           </td>
         </tr>
         {/foreach}

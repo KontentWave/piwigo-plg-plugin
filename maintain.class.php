@@ -15,11 +15,14 @@ class profile_liveness_guard_maintain extends PluginMaintain
     'auto_privatize_enabled' => true,
     'max_send_attempts_per_day' => 3,
     'require_admin_restore' => true,
+    'restore_original_privacy' => true,
+    'allow_privatize_without_snapshot' => false,
     'debug_log' => false,
   );
 
   private $table;
   private $log_table;
+  private $snapshot_table;
   private $dir;
 
   function __construct($plugin_id)
@@ -31,6 +34,7 @@ class profile_liveness_guard_maintain extends PluginMaintain
     // Class members can't be declared with computed values so initialization is done here
     $this->table = $prefixeTable . 'profile_liveness_guard';
     $this->log_table = $prefixeTable . 'profile_liveness_guard_log';
+    $this->snapshot_table = $prefixeTable . 'profile_liveness_guard_album_snapshot';
     $this->dir = PHPWG_ROOT_PATH . PWG_LOCAL_DIR . 'profile_liveness_guard/';
   }
 
@@ -109,6 +113,26 @@ CREATE TABLE IF NOT EXISTS `'. $this->log_table .'` (
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4
 ;');
 
+    pwg_query('
+CREATE TABLE IF NOT EXISTS `'. $this->snapshot_table .'` (
+  `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
+  `guard_record_id` int(11) unsigned NOT NULL,
+  `user_id` mediumint(8) unsigned NOT NULL,
+  `root_category_id` mediumint(8) unsigned NOT NULL,
+  `album_id` mediumint(8) unsigned NOT NULL,
+  `previous_status` varchar(16) NOT NULL,
+  `previous_visibility_mode` varchar(16) NOT NULL,
+  `previous_shared_user_ids` text DEFAULT NULL,
+  `restored_at` datetime DEFAULT NULL,
+  `restored_by` mediumint(8) unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `plg_snapshot_album` (`guard_record_id`, `album_id`),
+  KEY `plg_snapshot_record` (`guard_record_id`),
+  KEY `plg_snapshot_user_root` (`user_id`, `root_category_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4
+;');
+
     // create a local directory
     if (!file_exists($this->dir))
     {
@@ -163,6 +187,7 @@ CREATE TABLE IF NOT EXISTS `'. $this->log_table .'` (
     // delete table
     pwg_query('DROP TABLE `'. $this->table .'`;');
     pwg_query('DROP TABLE `'. $this->log_table .'`;');
+    pwg_query('DROP TABLE `'. $this->snapshot_table .'`;');
 
     // delete local folder
     // use a recursive function if you plan to have nested directories

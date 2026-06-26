@@ -58,6 +58,10 @@ $lang['Error'] = '错误';
 $lang['User'] = '用户';
 $lang['Action'] = '操作';
 $lang['Restore visibility'] = '恢复可见性';
+$lang['Restore saved visibility'] = '恢复已保存的可见性';
+$lang['Snapshot'] = '快照';
+$lang['Saved snapshot available'] = '已有保存的快照';
+$lang['Missing snapshot: restore to public is blocked for safety.'] = '缺少快照：出于安全考虑，已阻止恢复为公开状态。';
 $lang['No profiles are currently waiting for admin restore.'] = '当前没有资料在等待管理员恢复。';
 $lang['Recent audit events'] = '最近审计事件';
 $lang['When'] = '时间';
@@ -66,5 +70,10 @@ $lang['Actor'] = '执行者';
 $lang['Details'] = '详情';
 $lang['No audit events have been logged yet.'] = '尚未记录任何审计事件。';
 $lang['Profile visibility restored successfully.'] = '资料可见性已成功恢复。';
+$lang['Unable to capture a visibility snapshot right now.'] = '当前无法捕获可见性快照。';
+$lang['No visibility snapshot could be captured for this owner tree.'] = '无法为此所有者相册树捕获可见性快照。';
+$lang['No saved privacy snapshot exists for this record. Restoring all albums to public is unsafe and disabled by default.'] = '此记录没有已保存的隐私快照。将所有相册恢复为公开状态并不安全，默认已禁用。';
+$lang['No album visibility could be restored safely from the saved snapshot.'] = '无法从已保存的快照中安全恢复任何相册的可见性。';
+$lang['Some albums could not be restored from the saved snapshot and were left unchanged.'] = '部分相册无法从已保存的快照中恢复，因此保持不变。';
 
 ?>
